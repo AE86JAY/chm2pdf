@@ -1,5 +1,3 @@
-[file name]: apply-patches-fixed.sh
-[file content begin]
 #!/bin/bash
 # 修复的补丁应用脚本
 
@@ -100,4 +98,3 @@ done
 echo ""
 echo "应用补丁后的文件状态:"
 ls -la scripts/*.sh 2>/dev/null | head -10
-[file content end]
