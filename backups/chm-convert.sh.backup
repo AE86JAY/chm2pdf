@@ -250,7 +250,6 @@ def convert_to_pdf(html_file, pdf_output):
         '--footer-font-size', '10',
         '--quiet',
         '--disable-smart-shrinking',
-        '--default-font-size', str(font_size),  # 添加字体大小参数
         html_file,
         pdf_output
     ]
