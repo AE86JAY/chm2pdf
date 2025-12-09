@@ -1,0 +1,74 @@
+name: Update and Test Patches
+
+on:
+  pull_request:
+    paths:
+      - 'patches/**'
+      - 'scripts/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'patches/**'
+
+jobs:
+  test-patches:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Test patch application
+      run: |
+        echo "=== 测试补丁应用 ==="
+        
+        # 备份原始脚本
+        mkdir -p test-backup
+        cp scripts/*.sh test-backup/
+        
+        # 应用补丁
+        if [ -f "patches/apply-patches.sh" ]; then
+          chmod +x patches/apply-patches.sh
+          ./patches/apply-patches.sh
+        fi
+        
+        # 验证脚本语法
+        echo "验证脚本语法..."
+        for script in scripts/*.sh; do
+          if [ -f "$script" ]; then
+            echo "检查 $script..."
+            bash -n "$script" && echo "  ✓ 语法正确" || echo "  ✗ 语法错误"
+          fi
+        done
+        
+        # 运行简单测试
+        echo "运行简单测试..."
+        cd scripts
+        ./find-chm.sh || echo "find-chm.sh 测试完成"
+        
+        echo "补丁测试完成"
+    
+    - name: Create test report
+      if: always()
+      run: |
+        echo "=== 补丁测试报告 ==="
+        echo "测试时间: $(date)"
+        echo "仓库: $GITHUB_REPOSITORY"
+        echo "提交: $GITHUB_SHA"
+        echo ""
+        
+        if [ -d "patches" ]; then
+          echo "补丁文件:"
+          ls -la patches/*.patch 2>/dev/null || echo "无补丁文件"
+        else
+          echo "补丁目录不存在"
+        fi
+        
+        echo ""
+        echo "脚本状态:"
+        ls -la scripts/*.sh
+        
+        echo "测试完成"

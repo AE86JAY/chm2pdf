@@ -1,0 +1,137 @@
+#!/bin/bash
+# 创建字体大小修复补丁
+
+cat > patches/001-fix-font-size.patch << 'EOF'
+From: Fix Font Size Setting
+Date: $(date)
+Subject: [PATCH 001] 修复PDF字体大小设置不生效的问题
+
+---
+ scripts/chm-convert.sh | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/scripts/chm-convert.sh b/scripts/chm-convert.sh
+index abc123..def456 100644
+--- a/scripts/chm-convert.sh
++++ b/scripts/chm-convert.sh
+@@ -63,6 +63,12 @@ BASE_NAME=$(basename "$CHM_FILE" .chm)
+ PDF_OUTPUT="${OUTPUT_DIR}/${BASE_NAME}.pdf"
+ 
+ # 创建Python脚本来处理完整转换
++
++# 添加调试信息
++echo "调试信息:"
++echo "  FONT_SIZE = $FONT_SIZE"
++echo "  ZOOM_LEVEL = $ZOOM_LEVEL"
++
+ cat > "${WORK_DIR}/convert_full.py" << EOF
+ #!/usr/bin/env python3
+ """
+@@ -74,7 +80,7 @@ import subprocess
+ import re
+ from pathlib import Path
+ 
+-font_size=.*(FONT_SIZE)- 
++font_size=${FONT_SIZE}
+ zoom_level=.*(ZOOM_LEVEL)- 
+ 
+ def extract_chm_to_html(chm_path, output_dir):
+@@ -140,11 +146,11 @@ def create_master_html(html_files, hhc_urls, output_file, extracted_dir):
+     <style>
+         body {
+             font-family: Arial, sans-serif;
+-            font-size: ''' + str(font_size) + '''pt;
++            font-size: ''' + str(font_size) + '''pt !important;
+             margin: 0;
+             padding: 0;
+             line-height: 1.6;
+-        }
++        } 
+         .page-break {
+             page-break-after: always;
+             height: 0;
+@@ -157,14 +163,17 @@ def create_master_html(html_files, hhc_urls, output_file, extracted_dir):
+         h1, h2, h3 {
+             color: #333;
+             margin-top: 30px;
++            font-size: ''' + str(font_size + 2) + '''pt !important;
+         }
+         p {
+             margin: 15px 0;
++            font-size: ''' + str(font_size) + '''pt !important;
+         }
+         img {
+             max-width: 100%;
+             height: auto;
+         }
++        * { font-size: ''' + str(font_size) + '''pt !important; }
+     </style>
+ </head>
+ <body>
+@@ -233,24 +242,26 @@ def convert_to_pdf(html_file, pdf_output):
+     """使用wkhtmltopdf将HTML转换为PDF"""
+     
+     print(f"Converting to PDF: {pdf_output}")
++    print(f"Using font size: {font_size}pt")
++    print(f"Using zoom level: {zoom_level}")
+     
+     # wkhtmltopdf命令参数
+     cmd = [
+         'wkhtmltopdf',
+         '--enable-local-file-access',
+         '--page-size', 'A4',
+-        '--margin-top', '20mm',
+-        '--margin-bottom', '20mm',
+-        '--margin-left', '15mm',
+-        '--margin-right', '15mm',
++        '--margin-top', '15mm',
++        '--margin-bottom', '15mm',
++        '--margin-left', '10mm',
++        '--margin-right', '10mm',
+         '--encoding', 'UTF-8',
+         '--zoom', str(zoom_level),
++        '--default-font-size', str(font_size),
+         '--footer-center', '[page]/[toPage]',
+         '--footer-font-size', '10',
+         '--quiet',
+         '--disable-smart-shrinking',
+-        html_file,
+-        pdf_output
++        html_file, pdf_output
+     ]
+     
+     try:
+@@ -331,8 +342,8 @@ EOF
+ 
+ echo "开始CHM到PDF转换..."
+ 
+-# 安装必要的Python库
+-pip3 install PyPDF2 beautifulsoup4 lxml > /dev/null 2>&1 || echo "Python库安装失败或已安装"
++# 安装必要的Python库（确保安装成功）
++pip3 install PyPDF2 beautifulsoup4 lxml || echo "安装PyPDF2和beautifulsoup4..."
+ 
+ # 运行完整的转换脚本
+ python3 "${WORK_DIR}/convert_full.py" "$CHM_FILE" "$PDF_OUTPUT" "$WORK_DIR"
+@@ -342,6 +353,9 @@ if [ -f "$PDF_OUTPUT" ] && [ -s "$PDF_OUTPUT" ]; then
+     echo "PDF创建成功: $(basename "$PDF_OUTPUT")"
+     echo "PDF大小: $((PDF_SIZE / 1024)) KB"
+     
++    # 显示字体大小信息
++    echo "使用的字体大小: ${FONT_SIZE}pt"
++    
+     # 获取页数
+     if command -v pdfinfo &> /dev/null; then
+         PAGE_COUNT=$(pdfinfo "$PDF_OUTPUT" 2>/dev/null | grep "Pages:" | awk '{print $2}')
+@@ -386,6 +400,8 @@ else
+ fi
+ 
+ # 清理临时文件
+-rm -rf "$WORK_DIR"
++echo "清理临时工作目录..."
++rm -rf "$WORK_DIR" 2>/dev/null || true
++
+ echo "转换成功完成!"
+ echo "=============================================="
+--
+2.34.1
+EOF

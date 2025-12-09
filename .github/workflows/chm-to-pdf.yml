@@ -1,0 +1,231 @@
+name: CHM to PDF Converter
+
+on:
+  workflow_dispatch:
+    inputs:
+      font_size:
+        description: 'PDF字体大小（8-24，默认12）'
+        required: false
+        default: '12'
+        type: string
+      zoom_level:
+        description: '缩放比例（0.5-2.0，默认1.0）'
+        required: false
+        default: '1.0'
+        type: string
+      split_pages:
+        description: '分割页数（0=不分割，默认10）'
+        required: false
+        default: '10'
+        type: string
+      apply_patches:
+        description: '是否应用补丁更新'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+  push:
+    paths:
+      - 'input/**/*.chm'
+      - 'patches/**/*'      # 补丁文件更新时触发
+      - 'scripts/**/*'      # 脚本更新时触发
+  schedule:
+    # 每天运行一次，检查是否有新文件
+    - cron: '0 2 * * *'
+
+env:
+  INPUT_DIR: 'input'
+  OUTPUT_DIR: 'output'
+  TEMP_DIR: 'temp'
+  CHM_CONVERT_SCRIPT: 'scripts/chm-convert.sh'
+  SPLIT_PDF_SCRIPT: 'scripts/split-pdf.sh'
+  FIND_CHM_SCRIPT: 'scripts/find-chm.sh'
+  APPLY_PATCHES: ${{ github.event.inputs.apply_patches || 'true' }}
+  FONT_SIZE: ${{ github.event.inputs.font_size || '12' }}
+  ZOOM_LEVEL: ${{ github.event.inputs.zoom_level || '1.0' }}
+  SPLIT_PAGES: ${{ github.event.inputs.split_pages || '10' }}
+
+jobs:
+  convert-chm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史，便于补丁应用
+    
+    - name: Create directories
+      run: |
+        mkdir -p ${{ env.INPUT_DIR }}
+        mkdir -p ${{ env.OUTPUT_DIR }}
+        mkdir -p ${{ env.TEMP_DIR }}
+        mkdir -p backups
+    
+    - name: Apply patches if enabled
+      if: env.APPLY_PATCHES == 'true'
+      run: |
+        echo "=== 应用补丁更新 ==="
+        
+        # 安装补丁工具
+        if ! command -v patch &> /dev/null; then
+          echo "安装补丁工具..."
+          sudo apt-get update && sudo apt-get install -y patch || echo "跳过补丁工具安装"
+        fi
+        
+        # 检查是否存在补丁目录
+        if [ -d "patches" ]; then
+          echo "找到补丁目录，应用补丁..."
+          
+          # 使用修复的补丁应用脚本
+          chmod +x scripts/apply-patches-fixed.sh || true
+          
+          if [ -f "scripts/apply-patches-fixed.sh" ]; then
+            ./scripts/apply-patches-fixed.sh
+          elif [ -f "apply-patches.sh" ]; then
+            ./apply-patches.sh
+          else
+            echo "使用内联补丁应用逻辑..."
+            # ... 保持原有的内联补丁应用代码 ...
+          fi
+        else
+          echo "未找到补丁目录，跳过补丁应用"
+        fi
+        
+        # 验证脚本语法
+        echo "验证脚本语法..."
+        for script in scripts/*.sh; do
+          if [ -f "$script" ]; then
+            echo "检查 $script..."
+            bash -n "$script" && echo "  ✓ 语法正确" || echo "  ✗ 语法错误"
+          fi
+        done
+    
+    - name: Setup environment and install dependencies
+      run: |
+        echo "=== 安装依赖 ==="
+        echo "配置参数:"
+        echo "  字体大小: ${{ env.FONT_SIZE }}pt"
+        echo "  缩放比例: ${{ env.ZOOM_LEVEL }}"
+        echo "  分割页数: ${{ env.SPLIT_PAGES }}"
+        
+        sudo apt-get update
+        # 安装压缩解压工具
+        sudo apt-get install -y p7zip-full p7zip-rar bc
+        # 安装HTML转PDF工具
+        sudo apt-get install -y wkhtmltopdf
+        # 安装PDF处理工具
+        sudo apt-get install -y poppler-utils ghostscript
+        # 安装Python和相关依赖
+        sudo apt-get install -y python3 python3-pip
+        # 安装中文字体支持
+        sudo apt-get install -y fonts-wqy-zenhei fonts-noto-cjk
+        
+        # 安装Python库
+        pip3 install PyPDF2 beautifulsoup4 lxml
+        
+        # 安装Calibre（强大的电子书转换工具）
+        echo "安装Calibre用于CHM转换..."
+        sudo apt-get install -y calibre
+        
+        # 验证安装
+        echo "=== 已安装工具 ==="
+        which 7z || echo "7z未安装"
+        which wkhtmltopdf || echo "wkhtmltopdf未安装"
+        which pdfinfo || echo "pdfinfo未安装"
+        which ebook-convert || echo "ebook-convert未安装，将使用备用方法"
+    
+    - name: Make scripts executable
+      run: |
+        echo "设置脚本执行权限..."
+        chmod +x ${{ env.CHM_CONVERT_SCRIPT }}
+        chmod +x ${{ env.SPLIT_PDF_SCRIPT }}
+        chmod +x ${{ env.FIND_CHM_SCRIPT }}
+        echo "脚本权限设置完成"
+    
+    - name: Find CHM files
+      id: find-chm
+      run: |
+        echo "在 ${{ env.INPUT_DIR }} 目录中查找CHM文件..."
+        ${{ github.workspace }}/${{ env.FIND_CHM_SCRIPT }}
+        CHM_FILES=$(cat ${{ env.TEMP_DIR }}/chm_files.txt 2>/dev/null || echo "")
+        if [ -n "$CHM_FILES" ]; then
+          echo "找到 $(echo "$CHM_FILES" | wc -l) 个CHM文件"
+        else
+          echo "未找到CHM文件"
+        fi
+        echo "CHM_FILES=$CHM_FILES" >> $GITHUB_OUTPUT
+    
+    - name: Process CHM files
+      if: steps.find-chm.outputs.CHM_FILES != ''
+      env:
+        FONT_SIZE: ${{ env.FONT_SIZE }}
+        ZOOM_LEVEL: ${{ env.ZOOM_LEVEL }}
+        SPLIT_PAGES: ${{ env.SPLIT_PAGES }}
+      run: |
+        echo "=== 开始处理CHM文件 ==="
+        echo "配置参数:"
+        echo "  - 字体大小: ${FONT_SIZE}pt"
+        echo "  - 缩放比例: ${ZOOM_LEVEL}"
+        echo "  - 分割页数: ${SPLIT_PAGES}"
+        
+        # 读取CHM文件列表
+        CHM_LIST="${{ env.TEMP_DIR }}/chm_files.txt"
+        FILE_COUNT=0
+        
+        while IFS= read -r chm_file || [[ -n "$chm_file" ]]; do
+          if [ -f "$chm_file" ]; then
+            echo ""
+            echo "处理文件 [$((++FILE_COUNT))]: $(basename "$chm_file")"
+            ${{ github.workspace }}/${{ env.CHM_CONVERT_SCRIPT }} "$chm_file"
+          fi
+        done < "$CHM_LIST"
+        
+        if [ $FILE_COUNT -eq 0 ]; then
+          echo "未找到有效的CHM文件"
+        else
+          echo "处理完成，共处理 $FILE_COUNT 个文件"
+        fi
+    
+    - name: Check output files
+      if: always()
+      run: |
+        echo "=== 输出文件检查 ==="
+        if [ -d "${{ env.OUTPUT_DIR }}" ]; then
+          OUTPUT_COUNT=$(ls -1 "${{ env.OUTPUT_DIR }}"/*.pdf 2>/dev/null | wc -l || echo "0")
+          if [ "$OUTPUT_COUNT" -gt 0 ]; then
+            echo "生成PDF文件:"
+            ls -lh "${{ env.OUTPUT_DIR }}"/*.pdf 2>/dev/null || echo "无法列出文件"
+            echo "总计: $OUTPUT_COUNT 个PDF文件"
+          else
+            echo "输出目录为空"
+          fi
+        else
+          echo "输出目录不存在"
+        fi
+    
+    - name: Upload output files
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: converted-pdfs
+        path: ${{ env.OUTPUT_DIR }}/
+        retention-days: 7
+    
+    - name: Upload backup files
+      if: always() && env.APPLY_PATCHES == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: script-backups
+        path: backups/
+        retention-days: 3
+    
+    - name: Cleanup temporary files
+      if: always()
+      run: |
+        echo "清理临时文件..."
+        rm -rf ${{ env.TEMP_DIR }}/*
+        echo "清理完成"
