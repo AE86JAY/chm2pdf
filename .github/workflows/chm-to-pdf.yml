@@ -120,29 +120,34 @@ jobs:
       run: |
         echo "=== 应用补丁更新 ==="
         
-        # 安装补丁工具
-        if ! command -v patch &> /dev/null; then
-          echo "安装补丁工具..."
-          sudo apt-get update && sudo apt-get install -y patch || echo "跳过补丁工具安装"
-        fi
-        
-        # 检查是否存在补丁目录
-        if [ -d "patches" ]; then
-          echo "找到补丁目录，应用补丁..."
-          
-          # 使用修复的补丁应用脚本
-          chmod +x scripts/apply-patches-fixed.sh || true
-          
-          if [ -f "scripts/apply-patches-fixed.sh" ]; then
-            ./scripts/apply-patches-fixed.sh
-          elif [ -f "apply-patches.sh" ]; then
-            ./apply-patches.sh
-          else
-            echo "使用内联补丁应用逻辑..."
-            # ... 保持原有的内联补丁应用代码 ...
-          fi
+        # 检查是否启用PDF2DOCX功能
+        if [ "${{ env.ENABLE_PDF2DOCX }}" == 'true' ]; then
+          echo "PDF2DOCX功能已启用，跳过补丁应用（所有必要文件已提前创建）"
         else
-          echo "未找到补丁目录，跳过补丁应用"
+          # 安装补丁工具
+          if ! command -v patch &> /dev/null; then
+            echo "安装补丁工具..."
+            sudo apt-get update && sudo apt-get install -y patch || echo "跳过补丁工具安装"
+          fi
+          
+          # 检查是否存在补丁目录
+          if [ -d "patches" ]; then
+            echo "找到补丁目录，应用补丁..."
+            
+            # 使用修复的补丁应用脚本
+            chmod +x scripts/apply-patches-fixed.sh || true
+            
+            if [ -f "scripts/apply-patches-fixed.sh" ]; then
+              ./scripts/apply-patches-fixed.sh
+            elif [ -f "apply-patches.sh" ]; then
+              ./apply-patches.sh
+            else
+              echo "使用内联补丁应用逻辑..."
+              # ... 保持原有的内联补丁应用代码 ...
+            fi
+          else
+            echo "未找到补丁目录，跳过补丁应用"
+          fi
         fi
         
         # 验证脚本语法
