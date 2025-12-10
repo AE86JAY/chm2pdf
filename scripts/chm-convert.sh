@@ -60,7 +60,7 @@ BASE_NAME=$(basename "$CHM_FILE" .chm)
 PDF_OUTPUT="${OUTPUT_DIR}/${BASE_NAME}.pdf"
 
 # 创建Python脚本来处理完整转换
-cat > "${WORK_DIR}/convert_full.py" << 'EOF'
+cat > "${WORK_DIR}/convert_full.py" << EOF
 #!/usr/bin/env python3
 """
 CHM完整转换脚本 - 确保转换所有页面
