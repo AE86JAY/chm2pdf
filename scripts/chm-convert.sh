@@ -55,12 +55,12 @@ WORK_DIR="${TEMP_DIR}/work_${JOB_ID}"
 mkdir -p "${WORK_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 
-# 生成输出文件名
+# 生成输出文件路径
 BASE_NAME=$(basename "$CHM_FILE" .chm)
 PDF_OUTPUT="${OUTPUT_DIR}/${BASE_NAME}.pdf"
 
 # 创建Python脚本来处理完整转换
-cat > "${WORK_DIR}/convert_full.py" << EOF
+cat > "${WORK_DIR}/convert_full.py" << 'EOF'
 #!/usr/bin/env python3
 """
 CHM完整转换脚本 - 确保转换所有页面
@@ -418,19 +418,22 @@ except:
     echo "分割设置: ${SPLIT_PAGES}页 (0=不分割)"
     
     # 确保PAGE_COUNT是有效的数字
-    if ! [[ "${PAGE_COUNT:-0}" =~ ^[0-9]+$ ]]; then
+    if ! echo "${PAGE_COUNT:-0}" | grep -qE '^[0-9]+$'; then
         PAGE_COUNT=0
     fi
     
-    if [ "$SPLIT_PAGES" -ne 0 ] && [ "${PAGE_COUNT}" -gt "0" ] && [ "${PAGE_COUNT}" -gt "$SPLIT_PAGES" ]; then
-        echo "PDF有${PAGE_COUNT}页，超过分割阈值${SPLIT_PAGES}页，开始分割..."
-        "${WORKSPACE}/scripts/split-pdf.sh" "${PDF_OUTPUT}" "${SPLIT_PAGES}"
+    # 使用最基本的bash语法重新编写条件判断
+    if [ "$SPLIT_PAGES" -ne 0 ] && [ "${PAGE_COUNT}" -gt "0" ]; then
+        if [ "${PAGE_COUNT}" -gt "$SPLIT_PAGES" ]; then
+            echo "PDF有${PAGE_COUNT}页，超过分割阈值${SPLIT_PAGES}页，开始分割..."
+            "${WORKSPACE}/scripts/split-pdf.sh" "${PDF_OUTPUT}" "${SPLIT_PAGES}"
+        else
+            echo "PDF页数(${PAGE_COUNT})未超过分割阈值(${SPLIT_PAGES})，不进行分割。"
+        fi
     elif [ "${PAGE_COUNT}" -eq 0 ]; then
         echo "警告: PDF似乎有0页，转换可能失败。"
     elif [ "$SPLIT_PAGES" -eq 0 ]; then
         echo "分割页数设置为0，不进行分割。"
-    else
-        echo "PDF页数(${PAGE_COUNT})未超过分割阈值(${SPLIT_PAGES})，不进行分割。"
     fi
 else
     echo "创建PDF文件失败"
