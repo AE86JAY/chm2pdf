@@ -2,7 +2,7 @@
 
 这个 GitHub Actions 工作流可以自动将 CHM 文件转换为 PDF 格式，支持大文件转换、分割 PDF 文件。
 
-本项目代码基于 [DeepSeek AI生成](https://chat.deepseek.com/) 。
+本项目代码基于 [DeepSeek](https://chat.deepseek.com/) 和[Trae CN](https://www.trae.cn/) AI生成]。
 
 ## 功能特性
 

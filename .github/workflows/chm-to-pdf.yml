@@ -3,6 +3,11 @@ name: CHM to PDF Converter
 on:
   workflow_dispatch:
     inputs:
+      chm_file_pattern:
+        description: 'CHM文件匹配模式（支持通配符，如*.chm或**/*.chm）'
+        required: false
+        default: '**/*.chm'
+        type: string
       font_size:
         description: 'PDF字体大小（8-24，默认12）'
         required: false
@@ -26,14 +31,15 @@ on:
         options:
           - 'true'
           - 'false'
+
   push:
     paths:
       - 'input/**/*.chm'
-      - 'patches/**/*'      # 补丁文件更新时触发
-      - 'scripts/**/*'      # 脚本更新时触发
-  schedule:
+    #  - 'patches/**/*'      # 补丁文件更新时触发
+    #  - 'scripts/**/*'      # 脚本更新时触发
+  #schedule:
     # 每天运行一次，检查是否有新文件
-    - cron: '0 2 * * *'
+    # - cron: '0 2 * * *'
 
 env:
   INPUT_DIR: 'input'
@@ -42,6 +48,7 @@ env:
   CHM_CONVERT_SCRIPT: 'scripts/chm-convert.sh'
   SPLIT_PDF_SCRIPT: 'scripts/split-pdf.sh'
   FIND_CHM_SCRIPT: 'scripts/find-chm.sh'
+  CHM_FILE_PATTERN: ${{ github.event.inputs.chm_file_pattern || '**/*.chm' }}
   APPLY_PATCHES: ${{ github.event.inputs.apply_patches || 'true' }}
   FONT_SIZE: ${{ github.event.inputs.font_size || '12' }}
   ZOOM_LEVEL: ${{ github.event.inputs.zoom_level || '1.0' }}
@@ -148,12 +155,49 @@ jobs:
     
     - name: Find CHM files
       id: find-chm
+      env:
+        CHM_FILE_PATTERN: ${{ env.CHM_FILE_PATTERN }}
       run: |
         echo "在 ${{ env.INPUT_DIR }} 目录中查找CHM文件..."
-        ${{ github.workspace }}/${{ env.FIND_CHM_SCRIPT }}
-        CHM_FILES=$(cat ${{ env.TEMP_DIR }}/chm_files.txt 2>/dev/null || echo "")
+        echo "文件匹配模式: ${CHM_FILE_PATTERN}"
+        
+        # 使用增强的查找脚本，支持文件匹配模式
+        if [ -f "${{ github.workspace }}/${{ env.FIND_CHM_SCRIPT }}" ]; then
+          # 如果脚本存在，传递文件匹配模式参数
+          ${{ github.workspace }}/${{ env.FIND_CHM_SCRIPT }} "${CHM_FILE_PATTERN}"
+        else
+          # 备用方法：直接使用find命令
+          find "${{ env.INPUT_DIR }}" -name "${CHM_FILE_PATTERN#*/}" -type f > "${{ env.TEMP_DIR }}/chm_files.txt" 2>/dev/null || echo ""
+        fi
+        
+        CHM_FILES=$(cat "${{ env.TEMP_DIR }}/chm_files.txt" 2>/dev/null || echo "")
         if [ -n "$CHM_FILES" ]; then
-          echo "找到 $(echo "$CHM_FILES" | wc -l) 个CHM文件"
+          FILE_COUNT=$(echo "$CHM_FILES" | wc -l)
+          echo "找到 $FILE_COUNT 个CHM文件"
+          
+          # 过滤掉已存在PDF的CHM文件
+          FILTERED_FILES=""
+          while IFS= read -r chm_file || [[ -n "$chm_file" ]]; do
+            if [ -f "$chm_file" ]; then
+              BASE_NAME=$(basename "$chm_file" .chm)
+              PDF_FILE="${{ env.OUTPUT_DIR }}/${BASE_NAME}.pdf"
+              if [ ! -f "$PDF_FILE" ]; then
+                FILTERED_FILES="$FILTERED_FILES$chm_file\n"
+              else
+                echo "跳过已转换文件: $(basename \"$chm_file\") (PDF已存在)"
+              fi
+            fi
+          done <<< "$CHM_FILES"
+          
+          FILTERED_FILES=$(echo -e "$FILTERED_FILES" | sed '/^$/d')
+          if [ -n "$FILTERED_FILES" ]; then
+            echo "需要转换的文件: $(echo \"$FILTERED_FILES\" | wc -l) 个"
+            echo -e "$FILTERED_FILES" > "${{ env.TEMP_DIR }}/chm_files.txt"
+            CHM_FILES="$FILTERED_FILES"
+          else
+            echo "所有CHM文件都已转换完成"
+            CHM_FILES=""
+          fi
         else
           echo "未找到CHM文件"
         fi
@@ -179,7 +223,8 @@ jobs:
         while IFS= read -r chm_file || [[ -n "$chm_file" ]]; do
           if [ -f "$chm_file" ]; then
             echo ""
-            echo "处理文件 [$((++FILE_COUNT))]: $(basename "$chm_file")"
+            echo "处理文件 [$((++FILE_COUNT))]: $(basename \"$chm_file\")"
+            
             ${{ github.workspace }}/${{ env.CHM_CONVERT_SCRIPT }} "$chm_file"
           fi
         done < "$CHM_LIST"
