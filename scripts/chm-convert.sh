@@ -235,7 +235,7 @@ def convert_to_pdf(html_file, pdf_output):
     
     print(f"Converting to PDF: {pdf_output}")
     
-    # wkhtmltopdf命令参数
+    # wkhtmltopdf命令参数 - 移除不支持的参数
     cmd = [
         'wkhtmltopdf',
         '--enable-local-file-access',
@@ -246,11 +246,7 @@ def convert_to_pdf(html_file, pdf_output):
         '--margin-right', '15mm',
         '--encoding', 'UTF-8',
         '--zoom', str(zoom_level),
-        '--footer-center', '[page]/[toPage]',
-        '--footer-font-size', '10',
         '--quiet',
-        '--disable-smart-shrinking',
-        '--default-font-size', str(font_size),  # 添加字体大小参数
         html_file,
         pdf_output
     ]
