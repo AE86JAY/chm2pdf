@@ -74,7 +74,7 @@ if command -v ebook-convert &> /dev/null; then
         # 检查页数
         if command -v pdfinfo &> /dev/null; then
             PAGE_COUNT=$(pdfinfo "$PDF_OUTPUT" 2>/dev/null | grep "Pages:" | awk '{print $2}')
-            echo "Pages converted: ${PAGE_COUNT:-"unknown"}"
+            echo "Pages converted: ${PAGE_COUNT:-\"unknown\"}"
         fi
         
         # 清理临时目录
