@@ -417,10 +417,15 @@ except:
     # 根据分割页数设置决定是否分割
     echo "分割设置: ${SPLIT_PAGES}页 (0=不分割)"
     
-    if [ "$SPLIT_PAGES" -ne 0 ] && [ -n "$PAGE_COUNT" ] && [ "$PAGE_COUNT" -gt "$SPLIT_PAGES" ] 2>/dev/null; then
-        echo "PDF有$PAGE_COUNT页，超过分割阈值$SPLIT_PAGES页，开始分割..."
-        "${WORKSPACE}/scripts/split-pdf.sh" "$PDF_OUTPUT" "$SPLIT_PAGES"
-    elif [ "${PAGE_COUNT:-0}" -eq 0 ]; then
+    # 确保PAGE_COUNT是有效的数字
+    if ! [[ "${PAGE_COUNT:-0}" =~ ^[0-9]+$ ]]; then
+        PAGE_COUNT=0
+    fi
+    
+    if [ "$SPLIT_PAGES" -ne 0 ] && [ "${PAGE_COUNT}" -gt "0" ] && [ "${PAGE_COUNT}" -gt "$SPLIT_PAGES" ]; then
+        echo "PDF有${PAGE_COUNT}页，超过分割阈值${SPLIT_PAGES}页，开始分割..."
+        "${WORKSPACE}/scripts/split-pdf.sh" "${PDF_OUTPUT}" "${SPLIT_PAGES}"
+    elif [ "${PAGE_COUNT}" -eq 0 ]; then
         echo "警告: PDF似乎有0页，转换可能失败。"
     elif [ "$SPLIT_PAGES" -eq 0 ]; then
         echo "分割页数设置为0，不进行分割。"
