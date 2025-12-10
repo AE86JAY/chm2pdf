@@ -427,6 +427,8 @@ except:
     else
         echo "PDF页数(${PAGE_COUNT})未超过分割阈值(${SPLIT_PAGES})，不进行分割。"
     fi
+fi
+fi
 else
     echo "创建PDF文件失败"
     rm -rf "$WORK_DIR"
