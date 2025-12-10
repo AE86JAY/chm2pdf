@@ -136,32 +136,90 @@ def create_master_html(html_files, hhc_urls, output_file, extracted_dir):
     <meta charset="UTF-8">
     <title>Complete CHM Document</title>
     <style>
+        /* 强制字体大小控制 - 确保在所有情况下生效 */
         body {
-            font-family: Arial, sans-serif;
-            font-size: ''' + str(font_size) + '''pt;
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
+            font-family: Arial, sans-serif !important;
+            font-size: ''' + str(font_size) + '''pt !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1.6 !important;
         }
+        
+        /* 强制覆盖所有元素的字体大小 */
+        * {
+            font-size: ''' + str(font_size) + '''pt !important;
+        }
+        
+        /* 标题字体大小增强 */
+        h1 {
+            font-size: calc(''' + str(font_size) + '''pt + 6pt) !important;
+            color: #333 !important;
+            margin-top: 30px !important;
+        }
+        h2 {
+            font-size: calc(''' + str(font_size) + '''pt + 4pt) !important;
+            color: #333 !important;
+            margin-top: 30px !important;
+        }
+        h3 {
+            font-size: calc(''' + str(font_size) + '''pt + 2pt) !important;
+            color: #333 !important;
+            margin-top: 30px !important;
+        }
+        h4, h5, h6 {
+            font-size: calc(''' + str(font_size) + '''pt + 1pt) !important;
+            color: #333 !important;
+            margin-top: 30px !important;
+        }
+        
+        /* 段落和文本 */
+        p {
+            font-size: ''' + str(font_size) + '''pt !important;
+            margin: 15px 0 !important;
+        }
+        
+        /* 代码和预格式化文本 */
+        code, pre {
+            font-family: 'Courier New', monospace !important;
+            font-size: calc(''' + str(font_size) + '''pt - 1pt) !important;
+        }
+        
+        /* 表格和列表 */
+        table, th, td {
+            font-size: ''' + str(font_size) + '''pt !important;
+        }
+        li {
+            font-size: ''' + str(font_size) + '''pt !important;
+        }
+        
+        /* 内联元素覆盖 */
+        span, div {
+            font-size: ''' + str(font_size) + '''pt !important;
+        }
+        
+        /* 布局样式 */
         .page-break {
-            page-break-after: always;
-            height: 0;
-            margin: 0;
-            padding: 0;
+            page-break-after: always !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
         .content-page {
-            padding: 20px;
-        }
-        h1, h2, h3 {
-            color: #333;
-            margin-top: 30px;
-        }
-        p {
-            margin: 15px 0;
+            padding: 20px !important;
         }
         img {
-            max-width: 100%;
-            height: auto;
+            max-width: 100% !important;
+            height: auto !important;
+        }
+        
+        /* 移除所有内联样式 */
+        [style*="font-size"], [style*="font-size"] * {
+            font-size: ''' + str(font_size) + '''pt !important;
+        }
+        
+        /* 针对特定CHM内容的特殊处理 */
+        .chm-content, .chm-body, .chm-text {
+            font-size: ''' + str(font_size) + '''pt !important;
         }
     </style>
 </head>
