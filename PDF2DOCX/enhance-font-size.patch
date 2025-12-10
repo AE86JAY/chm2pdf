@@ -1,0 +1,196 @@
+--- a/PDF2DOCX/pdf-convert.sh
++++ b/PDF2DOCX/pdf-convert.sh
+@@ -29,6 +29,13 @@ DEFAULT_FONT_SIZE=12
+ DEFAULT_SPLIT_PAGES=10
+ 
+ # 从环境变量读取或使用默认值
++# 字体名称设置
++DEFAULT_FONT_NAME="Arial"
++FONT_NAME="${FONT_NAME:-$DEFAULT_FONT_NAME}"
++
++# 标题字体大小增量设置
++DEFAULT_TITLE_INCREMENT=6
++TITLE_INCREMENT="${TITLE_INCREMENT:-$DEFAULT_TITLE_INCREMENT}"
+ FONT_SIZE="${FONT_SIZE:-$DEFAULT_FONT_SIZE}"
+ SPLIT_PAGES="${SPLIT_PAGES:-$DEFAULT_SPLIT_PAGES}"
+ 
+@@ -42,6 +49,16 @@ if ! [[ "$SPLIT_PAGES" =~ ^[0-9]+$ ]] || [ "$SPLIT_PAGES" -lt 0 ]; then
+     SPLIT_PAGES="$DEFAULT_SPLIT_PAGES"
+ fi
+ 
++# 验证标题增量有效性
++if ! [[ "$TITLE_INCREMENT" =~ ^[0-9]+$ ]] || [ "$TITLE_INCREMENT" -lt 0 ] || [ "$TITLE_INCREMENT" -gt 12 ]; then
++    echo "警告: 标题增量 $TITLE_INCREMENT 无效，使用默认值 $DEFAULT_TITLE_INCREMENT"
++    TITLE_INCREMENT="$DEFAULT_TITLE_INCREMENT"
++fi
++
++# 验证字体名称有效性
++if [ -z "$FONT_NAME" ]; then
++    FONT_NAME="$DEFAULT_FONT_NAME"
++fi
+ echo "=============================================="
+ echo "PDF转DOCX转换"
+ echo "配置参数:"
+@@ -49,6 +66,8 @@ echo "配置参数:"
+ echo "  - 字体大小: ${FONT_SIZE}pt"
+ echo "  - 分割页数: ${SPLIT_PAGES} (0=不分割)"
+ echo "=============================================="
++echo "字体增强配置:"
++echo "  - 字体名称: ${FONT_NAME}"
++echo "  - 标题字体增量: ${TITLE_INCREMENT}pt"
++
+ # 参数：PDF文件路径
+ PDF_FILE="$1"
+@@ -74,13 +93,22 @@ DOCX_OUTPUT="${OUTPUT_DIR}/${BASE_NAME}.docx"
+ # 创建Python脚本来处理PDF到DOCX的转换
+ cat > "${WORK_DIR}/convert_pdf_to_docx.py" << EOF
+ #!/usr/bin/env python3
+-"""
+-PDF到DOCX转换脚本 - 确保转换所有页面并支持字体大小调整
+-"""
++"""
++PDF到DOCX转换脚本 - 增强版，支持字体大小、字体名称和标题样式调整
++"""
+ 
+ import os
+ import sys
+ import pdfplumber
+ from docx import Document
+ from docx.shared import Pt, Inches
+ from docx.enum.text import WD_ALIGN_PARAGRAPH
++from docx.enum.style import WD_STYLE_TYPE
++
++font_size = ${FONT_SIZE}
++font_name = "${FONT_NAME}"
++title_increment = ${TITLE_INCREMENT}
++
++# 计算不同级别的标题字体大小
++heading1_size = Pt(font_size + title_increment)
++heading2_size = Pt(font_size + int(title_increment * 0.7))
++heading3_size = Pt(font_size + int(title_increment * 0.4))
++
++def setup_document_styles(doc):
++    """设置文档的样式"""
++    try:
++        # 创建或更新标题样式
++        styles = doc.styles
++        
++        # 标题1样式
++        if 'Heading 1' in styles:
++            heading1 = styles['Heading 1']
++            heading1.font.name = font_name
++            heading1.font.size = heading1_size
++            heading1.font.bold = True
++            heading1.paragraph_format.space_after = Pt(12)
++            
++        # 标题2样式
++        if 'Heading 2' in styles:
++            heading2 = styles['Heading 2']
++            heading2.font.name = font_name
++            heading2.font.size = heading2_size
++            heading2.font.bold = True
++            heading2.paragraph_format.space_after = Pt(8)
++            
++        # 正文样式
++        if 'Normal' in styles:
++            normal = styles['Normal']
++            normal.font.name = font_name
++            normal.font.size = Pt(font_size)
++            normal.paragraph_format.space_after = Pt(6)
++            
++    except Exception as e:
++        print(f"设置文档样式时出错: {e}")
++
++def is_heading(line):
++    """检测一行文本是否可能是标题"""
++    # 标题特征：较短的行、全大写或首字母大写、可能以数字或特殊字符开头
++    line = line.strip()
++    if len(line) <= 100:  # 标题通常较短
++        # 检查是否全大写或首字母大写
++        if line.isupper() or (line and line[0].isupper() and not line[1:].islower()):
++            return True
++        # 检查是否以数字、点或其他常见标题标记开头
++        if line.startswith(('1.', '2.', '3.', '一、', '二、', '三、', '#', '##', '###')):
++            return True
++    return False
++
++def set_paragraph_font(paragraph, font_size_pt, is_bold=False):
++    """设置段落的字体属性"""
++    for run in paragraph.runs:
++        run.font.name = font_name
++        run.font.size = font_size_pt
++        run.font.bold = is_bold
++
+ def convert_pdf_to_docx(pdf_path, docx_output):
+     """将PDF文件转换为DOCX文件"""
+     
+     print(f"开始转换: {pdf_path} -> {docx_output}")
+     
+     # 创建新的Word文档
+     doc = Document()
++    
++    # 设置文档样式
++    setup_document_styles(doc)
+     
+     # 设置页面边距
+     sections = doc.sections
+     for section in sections:
+         section.top_margin = Inches(1.0)
+         section.bottom_margin = Inches(1.0)
+         section.left_margin = Inches(1.25)
+         section.right_margin = Inches(1.25)
+     
+     # 打开PDF文件
+     try:
+         with pdfplumber.open(pdf_path) as pdf:
+             total_pages = len(pdf.pages)
+             print(f"PDF总页数: {total_pages}")
+             
+             # 遍历每一页
+             for page_num, page in enumerate(pdf.pages, 1):
+                 print(f"处理第 {page_num}/{total_pages} 页...")
+                 
+                 # 提取文本
+                 text = page.extract_text()
+                 
+                 if text:
+                     # 添加页码
+                     page_header = doc.add_paragraph()
+                     page_header.add_run(f"第 {page_num} 页")
+                     page_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                     
+-                    # 设置段落字体大小
+-                    for run in page_header.runs:
+-                        run.font.size = Pt(font_size - 2)
++                    # 设置页眉字体
++                    set_paragraph_font(page_header, Pt(font_size - 2))
+                     
+                     # 按行分割文本并添加到文档
+                     lines = text.split('\n')
+                     for line in lines:
+                         if line.strip():
+                             paragraph = doc.add_paragraph(line.strip())
+                             
+-                            # 设置段落字体大小
+-                            for run in paragraph.runs:
+-                                run.font.size = Pt(font_size)
++                            # 根据内容特征判断是否为标题并设置相应样式
++                            if is_heading(line.strip()):
++                                # 可能是标题，使用稍大的字体并加粗
++                                set_paragraph_font(paragraph, heading2_size, True)
++                            else:
++                                # 普通文本
++                                set_paragraph_font(paragraph, Pt(font_size))
+                 
+                 # 在页面之间添加分页符（除了最后一页）
+                 if page_num < total_pages:
+                     doc.add_page_break()
+        
+        # 保存DOCX文件
+        doc.save(docx_output)
+        print(f"DOCX文件已保存: {docx_output}")
+        return True, total_pages
+        
+    except Exception as e:
+        print(f"转换过程出错: {e}")
+        return False, 0

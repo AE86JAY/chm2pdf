@@ -21,10 +21,15 @@ show_help() {
   verify               - 验证补丁状态
   help                 - 显示此帮助信息
 
+功能说明:
+  此工具支持管理CHM2PDF和PDF2DOCX功能相关的所有补丁。
+  PDF2DOCX补丁提供了PDF转换为DOCX的完整功能集。
+
 示例:
   $0 create fix-font-size
   $0 apply
   $0 list
+  $0 info pdf2docx_feature
 EOF
 }
 
@@ -79,16 +84,41 @@ create_patch() {
 list_patches() {
     if [ -d "patches" ]; then
         echo "可用补丁:"
-        echo "编号 | 补丁文件 | 描述"
-        echo "----|----------|------"
-        for patch in patches/*.patch; do
-            if [ -f "$patch" ]; then
-                patch_num=$(basename "$patch" | cut -d'-' -f1)
-                patch_desc=$(basename "$patch" | cut -d'-' -f2- | sed 's/.patch$//')
-                subject=$(head -n 10 "$patch" | grep "^Subject:" | cut -d':' -f2- | sed 's/^ //')
-                echo "$patch_num | $(basename $patch) | $subject"
+        echo "补丁文件 | 类型 | 描述"
+        echo "---------|------|------"
+        
+        # 检查并显示所有补丁，兼容不同的命名格式
+        for patch_file in $(ls patches/*.patch 2>/dev/null | sort -V); do
+            if [ -f "$patch_file" ]; then
+                local base_name=$(basename "$patch_file")
+                local type="CHM2PDF"
+                
+                # 根据文件名或内容判断补丁类型
+                if [[ "$base_name" == *"pdf2docx"* || "$base_name" == *"PDF2DOCX"* ]]; then
+                    type="PDF2DOCX"
+                fi
+                
+                # 获取描述信息
+                local subject=""
+                if head -n 10 "$patch_file" | grep -q "^Subject:"; then
+                    subject=$(head -n 10 "$patch_file" | grep "^Subject:" | cut -d':' -f2- | sed 's/^ //')
+                else
+                    # 如果没有标准subject行，尝试从文件名提取
+                    subject=$(echo "$base_name" | sed -E 's/^[0-9]+[-_]?//; s/\.patch$//; s/-/ /g')
+                fi
+                
+                echo "$base_name | $type | $subject"
             fi
         done
+        
+        # 显示统计信息
+        local total_patches=$(ls patches/*.patch 2>/dev/null | wc -l)
+        local pdf2docx_patches=$(ls patches/*pdf2docx*.patch patches/*PDF2DOCX*.patch 2>/dev/null | wc -l)
+        
+        echo ""
+        echo "补丁统计:"
+        echo "  总计: $total_patches 个补丁"
+        echo "  PDF2DOCX相关: $pdf2docx_patches 个补丁"
     else
         echo "补丁目录不存在"
     fi
@@ -96,11 +126,49 @@ list_patches() {
 
 apply_patches() {
     echo "应用所有补丁..."
+    
+    # 确保脚本有执行权限
+    chmod +x patches/*.sh 2>/dev/null || true
+    
     if [ -f "patches/apply-patches.sh" ]; then
         ./patches/apply-patches.sh
     else
-        echo "错误: 找不到补丁应用脚本"
-        exit 1
+        # 如果没有专用的应用脚本，使用patch命令直接应用
+        echo "未找到专用补丁应用脚本，直接应用补丁..."
+        local PATCH_COUNT=0
+        local FAILED_PATCHES=()
+        
+        # 按数字顺序排序补丁文件
+        for patch_file in $(ls patches/*.patch 2>/dev/null | sort -V); do
+            if [ -f "$patch_file" ]; then
+                PATCH_NAME=$(basename "$patch_file")
+                echo "应用补丁: $PATCH_NAME"
+                
+                # 尝试应用补丁
+                if patch -p1 --forward --dry-run < "$patch_file" > /dev/null 2>&1; then
+                    if patch -p1 --forward < "$patch_file"; then
+                        echo "  ✓ 应用成功"
+                        PATCH_COUNT=$((PATCH_COUNT + 1))
+                    else
+                        echo "  ✗ 应用失败"
+                        FAILED_PATCHES+=($PATCH_NAME)
+                    fi
+                else
+                    echo "  ⚠ 补丁不适用当前版本或已应用"
+                fi
+            fi
+        done
+        
+        echo ""
+        echo "补丁应用完成:"
+        echo "  成功: $PATCH_COUNT"
+        echo "  失败: ${#FAILED_PATCHES[@]}"
+    fi
+    
+    # 确保PDF2DOCX脚本有执行权限
+    if [ -d "PDF2DOCX" ]; then
+        echo "设置PDF2DOCX脚本执行权限..."
+        chmod +x PDF2DOCX/*.sh 2>/dev/null || true
     fi
 }
 
@@ -111,23 +179,54 @@ patch_info() {
         exit 1
     fi
     
+    # 尝试多种文件匹配方式
     local patch_file="patches/${patch_name}.patch"
     if [ ! -f "$patch_file" ]; then
         patch_file=$(find patches -name "*${patch_name}*.patch" | head -1)
     fi
     
     if [ -f "$patch_file" ]; then
+        local base_name=$(basename "$patch_file")
+        local type="CHM2PDF"
+        
+        # 判断补丁类型
+        if [[ "$base_name" == *"pdf2docx"* || "$base_name" == *"PDF2DOCX"* ]]; then
+            type="PDF2DOCX"
+        fi
+        
         echo "补丁文件: $patch_file"
+        echo "类型: $type"
         echo "大小: $(wc -l < "$patch_file") 行"
         echo ""
         echo "补丁信息:"
-        head -n 10 "$patch_file"
+        
+        # 显示补丁头信息
+        if head -n 10 "$patch_file" | grep -q "^From:\|^Date:\|^Subject:"; then
+            head -n 10 "$patch_file" | grep -E "^From:|^Date:|^Subject:"
+        else
+            echo "  [没有标准补丁头信息]"
+        fi
+        
         echo ""
         echo "修改的文件:"
-        grep "^--- " "$patch_file" | sed 's/^--- //'
+        if grep -q "^--- " "$patch_file"; then
+            grep "^--- " "$patch_file" | sed 's/^--- //'
+        else
+            # 对于非标准补丁格式，尝试提取文件路径信息
+            grep -E "^[a-zA-Z0-9_\-\./]+" "$patch_file" | head -5
+        fi
+        
         echo ""
-        echo "预览前50行:"
-        head -n 50 "$patch_file" | tail -n 40
+        echo "功能概述:"
+        if [ "$type" == "PDF2DOCX" ]; then
+            echo "  此补丁提供PDF到DOCX转换功能，包括字体调整、文件分割等特性"
+        else
+            echo "  此补丁提供CHM2PDF相关功能增强或修复"
+        fi
+        
+        echo ""
+        echo "预览内容（前20行）:"
+        head -n 20 "$patch_file"
     else
         echo "错误: 找不到补丁文件 $patch_name"
     fi

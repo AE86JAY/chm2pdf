@@ -13,6 +13,7 @@
 - ✅ **多种触发方式** - 支持手动触发、文件推送触发和定时触发
 - ✅ **中文支持** - 内置中文字体，支持中文 CHM 文件
 - ✅ **容错处理** - 多种转换方法备选，确保转换成功率
+- ✅ **PDF2DOCX 功能** - 新增 PDF 到 DOCX 转换功能，支持批量处理和自定义设置
 
 ## 快速开始
 
@@ -69,6 +70,19 @@ cp /path/to/your/file.chm input/
 └── workflows/
     └── chm-to-pdf.yml    # GitHub Actions 工作流定义
 
+PDF2DOCX/                 # PDF 转 DOCX 功能模块
+├── main-pdf2docx.sh      # PDF2DOCX 主脚本
+├── pdf-convert.sh        # PDF 转换核心脚本
+├── find-pdf.sh           # PDF 文件查找脚本
+├── split-docx.sh         # DOCX 分割脚本
+└── enhance-font-size.patch # 字体增强补丁
+
+patches/                  # 补丁管理目录
+├── 001_pdf2docx_feature.patch  # PDF2DOCX 功能补丁
+├── 002_enhance_font_size.patch # 字体大小增强补丁
+├── manage-patches.sh     # 补丁管理脚本
+└── apply-patches.sh      # 补丁应用脚本
+
 scripts/
 ├── chm-convert.sh        # 主转换脚本
 ├── split-pdf.sh          # PDF 分割脚本
@@ -93,6 +107,47 @@ temp/                     # 临时目录（工作流自动创建）
 - ✅ **小文件**：< 50MB
 - ✅ **大文件**：50MB - 200MB（推荐）
 - ⚠️ **超大文件**：> 200MB（可能需要调整超时设置）
+
+## PDF2DOCX 功能使用说明
+
+### 1. 功能概述
+PDF2DOCX 模块提供了将 PDF 文件转换为 DOCX 格式的能力，支持批量转换、字体优化和文件分割功能。
+
+### 2. 使用方法
+
+#### 方法一：应用补丁启用功能
+```bash
+# 在项目根目录执行
+cd patches
+./apply-patches.sh
+```
+
+#### 方法二：直接使用 PDF2DOCX 脚本
+```bash
+# 在项目根目录执行
+cd PDF2DOCX
+./main-pdf2docx.sh [PDF文件路径或目录]
+```
+
+### 3. 补丁管理
+使用补丁管理脚本可以方便地管理所有功能补丁：
+```bash
+# 查看可用补丁
+cd patches
+./manage-patches.sh list
+
+# 应用特定补丁
+./manage-patches.sh apply 001_pdf2docx_feature.patch
+
+# 查看补丁信息
+./manage-patches.sh info 001_pdf2docx_feature.patch
+```
+
+### 4. PDF2DOCX 功能配置
+在 `PDF2DOCX/main-pdf2docx.sh` 中可以调整以下参数：
+- `INPUT_DIR`: 输入目录（默认搜索所有PDF文件）
+- `OUTPUT_DIR`: 输出目录（默认 `output/docx`）
+- `FONT_SIZE_ADJUSTMENT`: 字体大小调整参数（默认 1.2）
 
 ## 转换方法优先级
 
@@ -139,6 +194,13 @@ schedule:
 1. 确保 CHM 文件没有损坏
 2. 查看工作流运行日志获取详细错误信息
 3. 尝试手动运行 `ebook-convert` 命令测试
+4. 对于 PDF2DOCX 功能，检查是否已应用相关补丁
+
+### Q: PDF2DOCX 功能无法使用？
+**A**: 确保：
+1. 已应用 `001_pdf2docx_feature.patch` 补丁
+2. PDF2DOCX 目录下的脚本有执行权限
+3. 系统已安装必要的转换工具（如 LibreOffice）
 
 ### Q: 超大文件（>200MB）无法转换？
 **A**: 可以尝试：
@@ -177,6 +239,8 @@ jobs:
 | p7zip | CHM 文件解压 | 最新版 |
 | poppler-utils | PDF 处理 | 最新版 |
 | Python3 + PyPDF2 | PDF 分割和操作 | Python 3.x |
+| LibreOffice | PDF 转 DOCX 转换 | 最新版或 7.x 版本 |
+| pdf2docx | PDF 到 DOCX 转换库 | 最新版
 
 ### 转换流程
 

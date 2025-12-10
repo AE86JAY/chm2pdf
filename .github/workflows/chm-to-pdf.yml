@@ -31,6 +31,32 @@ on:
         options:
           - 'true'
           - 'false'
+      enable_pdf2docx:
+        description: '是否启用PDF到DOCX转换'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      pdf_file_pattern:
+        description: 'PDF文件匹配模式（支持通配符，如*.pdf或**/*.pdf）'
+        required: false
+        default: '**/*.pdf'
+        type: string
+      font_size_adjustment:
+        description: 'DOCX字体大小调整参数（0.5-2.0，默认1.2）'
+        required: false
+        default: '1.2'
+        type: string
+      split_docx:
+        description: '是否分割大型DOCX文件'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
   push:
     paths:
@@ -44,15 +70,24 @@ on:
 env:
   INPUT_DIR: 'input'
   OUTPUT_DIR: 'output'
+  OUTPUT_DOCX_DIR: 'output/docx'
   TEMP_DIR: 'temp'
   CHM_CONVERT_SCRIPT: 'scripts/chm-convert.sh'
   SPLIT_PDF_SCRIPT: 'scripts/split-pdf.sh'
   FIND_CHM_SCRIPT: 'scripts/find-chm.sh'
+  PDF2DOCX_MAIN_SCRIPT: 'PDF2DOCX/main-pdf2docx.sh'
+  PDF2DOCX_CONVERT_SCRIPT: 'PDF2DOCX/pdf-convert.sh'
+  PDF2DOCX_FIND_SCRIPT: 'PDF2DOCX/find-pdf.sh'
+  PDF2DOCX_SPLIT_SCRIPT: 'PDF2DOCX/split-docx.sh'
   CHM_FILE_PATTERN: ${{ github.event.inputs.chm_file_pattern || '**/*.chm' }}
   APPLY_PATCHES: ${{ github.event.inputs.apply_patches || 'true' }}
   FONT_SIZE: ${{ github.event.inputs.font_size || '12' }}
   ZOOM_LEVEL: ${{ github.event.inputs.zoom_level || '1.0' }}
   SPLIT_PAGES: ${{ github.event.inputs.split_pages || '10' }}
+  ENABLE_PDF2DOCX: ${{ github.event.inputs.enable_pdf2docx || 'false' }}
+  PDF_FILE_PATTERN: ${{ github.event.inputs.pdf_file_pattern || '**/*.pdf' }}
+  FONT_SIZE_ADJUSTMENT: ${{ github.event.inputs.font_size_adjustment || '1.2' }}
+  SPLIT_DOCX: ${{ github.event.inputs.split_docx || 'true' }}
 
 jobs:
   convert-chm:
@@ -118,6 +153,7 @@ jobs:
         echo "  字体大小: ${{ env.FONT_SIZE }}pt"
         echo "  缩放比例: ${{ env.ZOOM_LEVEL }}"
         echo "  分割页数: ${{ env.SPLIT_PAGES }}"
+        echo "  PDF2DOCX: ${{ env.ENABLE_PDF2DOCX }}"
         
         sudo apt-get update
         # 安装压缩解压工具
@@ -138,12 +174,28 @@ jobs:
         echo "安装Calibre用于CHM转换..."
         sudo apt-get install -y calibre
         
+        # 安装PDF2DOCX所需的依赖
+        if [ "${{ env.ENABLE_PDF2DOCX }}" = "true" ]; then
+          echo "=== 安装PDF2DOCX依赖 ==="
+          # 安装LibreOffice用于PDF转DOCX
+          sudo apt-get install -y libreoffice libreoffice-writer
+          # 安装pdf2docx Python库
+          pip3 install pdf2docx
+          echo "PDF2DOCX依赖安装完成"
+        fi
+        
         # 验证安装
         echo "=== 已安装工具 ==="
         which 7z || echo "7z未安装"
         which wkhtmltopdf || echo "wkhtmltopdf未安装"
         which pdfinfo || echo "pdfinfo未安装"
         which ebook-convert || echo "ebook-convert未安装，将使用备用方法"
+        
+        # 验证PDF2DOCX依赖
+        if [ "${{ env.ENABLE_PDF2DOCX }}" = "true" ]; then
+          which libreoffice || echo "LibreOffice未安装"
+          python3 -c "import pdf2docx; print('pdf2docx版本:', pdf2docx.__version__)" || echo "pdf2docx库未安装"
+        fi
     
     - name: Make scripts executable
       run: |
@@ -151,6 +203,14 @@ jobs:
         chmod +x ${{ env.CHM_CONVERT_SCRIPT }}
         chmod +x ${{ env.SPLIT_PDF_SCRIPT }}
         chmod +x ${{ env.FIND_CHM_SCRIPT }}
+        
+        # 设置PDF2DOCX脚本权限
+        if [ -f "${{ github.workspace }}/${{ env.PDF2DOCX_MAIN_SCRIPT }}" ]; then
+          chmod +x ${{ env.PDF2DOCX_MAIN_SCRIPT }}
+          chmod +x ${{ env.PDF2DOCX_CONVERT_SCRIPT }}
+          chmod +x ${{ env.PDF2DOCX_FIND_SCRIPT }}
+          chmod +x ${{ env.PDF2DOCX_SPLIT_SCRIPT }}
+        fi
         echo "脚本权限设置完成"
     
     - name: Find CHM files
@@ -235,6 +295,46 @@ jobs:
           echo "处理完成，共处理 $FILE_COUNT 个文件"
         fi
     
+    - name: PDF to DOCX Conversion
+      if: env.ENABLE_PDF2DOCX == 'true' && steps.find-chm.outputs.CHM_FILES != ''
+      env:
+        FONT_SIZE_ADJUSTMENT: ${{ env.FONT_SIZE_ADJUSTMENT }}
+        SPLIT_DOCX: ${{ env.SPLIT_DOCX }}
+      run: |
+        echo "=== PDF到DOCX转换开始 ==="
+        echo "配置参数:"
+        echo "  字体大小调整: ${FONT_SIZE_ADJUSTMENT}"
+        echo "  分割DOCX: ${SPLIT_DOCX}"
+        
+        # 创建DOCX输出目录
+        mkdir -p "${{ env.OUTPUT_DOCX_DIR }}"
+        
+        # 检查PDF文件是否存在
+        PDF_FILES=$(find "${{ env.OUTPUT_DIR }}" -name "*.pdf" 2>/dev/null || echo "")
+        if [ -z "$PDF_FILES" ]; then
+          echo "警告: 未找到PDF文件进行转换"
+          exit 0
+        fi
+        
+        # 使用PDF2DOCX主脚本进行转换
+        if [ -f "${{ github.workspace }}/${{ env.PDF2DOCX_MAIN_SCRIPT }}" ]; then
+          echo "使用主脚本进行PDF到DOCX转换..."
+          ${{ github.workspace }}/${{ env.PDF2DOCX_MAIN_SCRIPT }} "${{ env.OUTPUT_DIR }}" "${{ env.OUTPUT_DOCX_DIR }}" "${FONT_SIZE_ADJUSTMENT}" "${SPLIT_DOCX}"
+        else
+          echo "警告: PDF2DOCX主脚本不存在，使用命令行转换"
+          # 直接使用LibreOffice命令进行转换
+          for pdf_file in $PDF_FILES; do
+            filename=$(basename "$pdf_file" .pdf)
+            docx_file="${{ env.OUTPUT_DOCX_DIR }}/${filename}.docx"
+            echo "转换: $pdf_file -> $docx_file"
+            libreoffice --headless --convert-to docx "$pdf_file" --outdir "${{ env.OUTPUT_DOCX_DIR }}" || echo "转换失败: $pdf_file"
+          done
+        fi
+        
+        # 检查转换结果
+        DOCX_COUNT=$(ls -1 "${{ env.OUTPUT_DOCX_DIR }}"/*.docx 2>/dev/null | wc -l || echo "0")
+        echo "PDF到DOCX转换完成，生成 $DOCX_COUNT 个DOCX文件"
+    
     - name: Check output files
       if: always()
       run: |
@@ -251,14 +351,34 @@ jobs:
         else
           echo "输出目录不存在"
         fi
+        
+        # 检查DOCX输出文件
+        if [ "${{ env.ENABLE_PDF2DOCX }}" = "true" ] && [ -d "${{ env.OUTPUT_DOCX_DIR }}" ]; then
+          DOCX_COUNT=$(ls -1 "${{ env.OUTPUT_DOCX_DIR }}"/*.docx 2>/dev/null | wc -l || echo "0")
+          if [ "$DOCX_COUNT" -gt 0 ]; then
+            echo "生成DOCX文件:"
+            ls -lh "${{ env.OUTPUT_DOCX_DIR }}"/*.docx 2>/dev/null || echo "无法列出文件"
+            echo "总计: $DOCX_COUNT 个DOCX文件"
+          fi
+        fi
     
-    - name: Upload output files
-      if: success()
+    - name: Upload PDF output files
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: converted-pdfs
         path: ${{ env.OUTPUT_DIR }}/
         retention-days: 7
+        if-no-files-found: ignore
+        
+    - name: Upload DOCX output files
+      if: env.ENABLE_PDF2DOCX == 'true' && always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: converted-docx
+        path: ${{ env.OUTPUT_DOCX_DIR }}/
+        retention-days: 7
+        if-no-files-found: ignore
     
     - name: Upload backup files
       if: always() && env.APPLY_PATCHES == 'true'
@@ -273,4 +393,7 @@ jobs:
       run: |
         echo "清理临时文件..."
         rm -rf ${{ env.TEMP_DIR }}/*
+        # 可选：清理输出目录
+        # rm -rf "${{ env.OUTPUT_DIR }}"
+        # rm -rf "${{ env.OUTPUT_DOCX_DIR }}"
         echo "清理完成"

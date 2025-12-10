@@ -1,0 +1,836 @@
+--- /dev/null
++++ b/PDF2DOCX/main-pdf2docx.sh
+@@ -0,0 +1,120 @@
++#!/bin/bash
++
++# PDF到DOCX转换工具 - 主脚本
++# 用于批量处理PDF文件转换为DOCX格式
++
++# 设置工作目录
++WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
++
++# 默认配置参数
++DEFAULT_INPUT_DIR="${WORKSPACE}/input"
++DEFAULT_OUTPUT_DIR="${WORKSPACE}/output"
++DEFAULT_FONT_SIZE=12
++DEFAULT_SPLIT_PAGES=100
++
++# 从环境变量读取或使用默认值
++INPUT_DIR="${INPUT_DIR:-$DEFAULT_INPUT_DIR}"
++OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
++FONT_SIZE="${FONT_SIZE:-$DEFAULT_FONT_SIZE}"
++SPLIT_PAGES="${SPLIT_PAGES:-$DEFAULT_SPLIT_PAGES}"
++DELETE_TEMP="${DELETE_TEMP:-true}"
++DELETE_ORIGINAL="${DELETE_ORIGINAL:-false}"
++
++# 脚本目录
++SCRIPT_DIR="$(dirname "$0")"
++
++# 确保脚本有执行权限
++chmod +x "${SCRIPT_DIR}/find-pdf.sh"
++chmod +x "${SCRIPT_DIR}/pdf-convert.sh"
++chmod +x "${SCRIPT_DIR}/split-docx.sh"
++
++echo "=============================================="
++echo "PDF到DOCX批量转换工具"
++echo "工作目录: ${WORKSPACE}"
++echo "输入目录: ${INPUT_DIR}"
++echo "输出目录: ${OUTPUT_DIR}"
++echo "字体大小: ${FONT_SIZE}pt"
++echo "分割页数: ${SPLIT_PAGES} (0=不分割)"
++echo "=============================================="
++
++# 创建必要的目录
++mkdir -p "${INPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}"
++
++# 检查输入目录是否存在
++if [ ! -d "${INPUT_DIR}" ]; then
++    echo "错误: 输入目录 ${INPUT_DIR} 不存在"
++    exit 1
++fi
++
++# 获取待转换的PDF文件列表
++echo "查找PDF文件..."
++PDF_FILES=()
++
++# 检查是否通过环境变量传入特定文件
++if [ -n "${PDF_FILE}" ]; then
++    if [ -f "${PDF_FILE}" ]; then
++        PDF_FILES+="${PDF_FILE}"
++        echo "发现指定文件: ${PDF_FILE}"
++    else
++        echo "警告: 指定的文件 ${PDF_FILE} 不存在"
++    fi
++else
++    # 调用查找脚本
++    source "${SCRIPT_DIR}/find-pdf.sh"
++    
++    # 检查find-pdf.sh是否成功执行
++    if [ $? -ne 0 ]; then
++        echo "错误: 查找PDF文件失败"
++        exit 1
++    fi
++
++    # 从find-pdf.sh获取结果
++    TEMP_FILE="${WORKSPACE}/temp_pdf_list.txt"
++    if [ -f "${TEMP_FILE}" ]; then
++        PDF_FILES=($(cat "${TEMP_FILE}"))
++        rm -f "${TEMP_FILE}"
++    fi
++fi
++
++# 检查是否找到了PDF文件
++if [ ${#PDF_FILES[@]} -eq 0 ]; then
++    echo "未找到任何PDF文件!"
++    exit 0
++
++fi
++
++echo "找到 ${#PDF_FILES[@]} 个PDF文件待转换:"
++for pdf in "${PDF_FILES[@]}"; do
++    echo "  - $(basename "$pdf")"
+done
++
++# 处理每个PDF文件
++TOTAL_FILES=${#PDF_FILES[@]}
++SUCCESS_COUNT=0
++FAILURE_COUNT=0
++
++echo "=============================================="
++echo "开始转换处理..."
++echo "=============================================="
++
++for i in "${!PDF_FILES[@]}"; do
++    pdf_file="${PDF_FILES[$i]}"
++    echo "处理文件 ${i+1}/${TOTAL_FILES}: $(basename "$pdf_file")"
++
++    # 调用转换脚本
++    FONT_SIZE="${FONT_SIZE}" SPLIT_PAGES="${SPLIT_PAGES}" DELETE_ORIGINAL="${DELETE_ORIGINAL}" \
++    "${SCRIPT_DIR}/pdf-convert.sh" "${pdf_file}" "${OUTPUT_DIR}"
++
++    if [ $? -eq 0 ]; then
++        echo "✓ 转换成功"
++        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
++    else
++        echo "✗ 转换失败"
++        FAILURE_COUNT=$((FAILURE_COUNT + 1))
++    fi
++
++    echo "----------------------------------------------"
+done
++
++# 清理临时文件
++if [ "$DELETE_TEMP" = "true" ]; then
++    # 删除临时目录（如果存在）
++    rm -rf "${WORKSPACE}/temp"
++fi
++
++# 输出统计信息
++echo "=============================================="
++echo "转换处理完成!"
++echo "总文件数: ${TOTAL_FILES}"
++echo "成功数:   ${SUCCESS_COUNT}"
++echo "失败数:   ${FAILURE_COUNT}"
++echo "输出目录: ${OUTPUT_DIR}"
++echo "=============================================="
++
++# 根据执行结果返回退出码
++if [ $FAILURE_COUNT -eq 0 ]; then
++    exit 0
+else
++    exit 1
+fi
+--- /dev/null
++++ b/PDF2DOCX/find-pdf.sh
+@@ -0,0 +1,71 @@
++#!/bin/bash
++
++# 设置工作目录
++WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
++
++# 默认配置
++DEFAULT_INPUT_DIR="${WORKSPACE}/input"
++INPUT_DIR="${INPUT_DIR:-$DEFAULT_INPUT_DIR}"
++MIN_SIZE="${MIN_SIZE:-1}"  # 最小文件大小（KB）
++MAX_SIZE="${MAX_SIZE:-1048576}"  # 最大文件大小（KB，默认为1GB）
++
++echo "=============================================="
++echo "PDF文件查找工具"
++echo "工作目录: ${WORKSPACE}"
++echo "查找目录: ${INPUT_DIR}"
++echo "文件大小范围: ${MIN_SIZE}KB - ${MAX_SIZE}KB"
++echo "=============================================="
++
++# 检查输入目录是否存在
++if [ ! -d "${INPUT_DIR}" ]; then
++    echo "错误: 查找目录 ${INPUT_DIR} 不存在"
++    exit 1
+fi
++
++# 创建临时文件用于保存结果
++TEMP_FILE="${WORKSPACE}/temp_pdf_list.txt"
++rm -f "${TEMP_FILE}"
++
++echo "开始查找PDF文件..."
++
++# 使用find命令查找PDF文件
++if command -v find &> /dev/null; then
++    # 在Windows中，find命令的语法略有不同
++    # 这里使用PowerShell兼容的方式
++    powershell -Command "Get-ChildItem -Path '${INPUT_DIR}' -Filter '*.pdf' -Recurse -File | Where-Object { $_.Length -ge ${MIN_SIZE}KB -and $_.Length -le ${MAX_SIZE}KB } | Select-Object -ExpandProperty FullName | Set-Content -Path '${TEMP_FILE}'"
++    
++    if [ $? -ne 0 ]; then
++        echo "警告: PowerShell查找失败，尝试使用普通查找"
++        find "${INPUT_DIR}" -name "*.pdf" -type f | sort > "${TEMP_FILE}"
++    fi
++else
++    echo "警告: find命令不可用，使用简单查找"
++    # 简单查找方式
++    for pdf_file in "${INPUT_DIR}"/*.pdf; do
++        if [ -f "$pdf_file" ]; then
++            echo "$pdf_file" >> "${TEMP_FILE}"
++        fi
++    done
++fi
++
++# 检查是否找到了文件
++if [ ! -f "${TEMP_FILE}" ] || [ ! -s "${TEMP_FILE}" ]; then
++    echo "未找到PDF文件!"
++    exit 1
+fi
++
++# 统计文件数量
++FILE_COUNT=$(wc -l "${TEMP_FILE}" 2>/dev/null | awk '{print $1}' || echo "0")
++
++if [ "$FILE_COUNT" -eq 0 ]; then
++    echo "未找到有效的PDF文件!"
++    rm -f "${TEMP_FILE}"
++    exit 1
+fi
++
++echo "找到 ${FILE_COUNT} 个PDF文件:"
++
++# 显示找到的文件（最多显示前10个）
++COUNT=0
++while IFS= read -r pdf_file; do
++    if [ -f "$pdf_file" ]; then
++        COUNT=$((COUNT + 1))
++        if [ "$COUNT" -le 10 ]; then
++            # 获取文件大小
++            FILE_SIZE=$(ls -lh "$pdf_file" 2>/dev/null | awk '{print $5}' || echo "未知")
++            echo "  $COUNT. $(basename "$pdf_file") - ${FILE_SIZE}"
++        fi
++    fi
+done < "${TEMP_FILE}"
++
++if [ "$COUNT" -gt 10 ]; then
++    echo "  ... 还有 $((COUNT - 10)) 个文件"
+fi
++
++echo "查找结果已保存，准备进行转换处理..."
+exit 0
+--- /dev/null
++++ b/PDF2DOCX/pdf-convert.sh
+@@ -0,0 +1,152 @@
++#!/bin/bash
++
++# PDF到DOCX转换工具 - 核心转换脚本
++
++# 默认配置参数
++DEFAULT_FONT_SIZE=12
++DEFAULT_SPLIT_PAGES=100
++DEFAULT_FONT_NAME="Arial"
++DEFAULT_TITLE_INCREMENT=6
++
++# 从环境变量读取或使用默认值
++FONT_SIZE="${FONT_SIZE:-$DEFAULT_FONT_SIZE}"
++SPLIT_PAGES="${SPLIT_PAGES:-$DEFAULT_SPLIT_PAGES}"
++FONT_NAME="${FONT_NAME:-$DEFAULT_FONT_NAME}"
++TITLE_INCREMENT="${TITLE_INCREMENT:-$DEFAULT_TITLE_INCREMENT}"
++DELETE_ORIGINAL="${DELETE_ORIGINAL:-false}"
++
++# 验证参数有效性
++if ! [[ "$FONT_SIZE" =~ ^[0-9]+$ ]] || [ "$FONT_SIZE" -lt 6 ] || [ "$FONT_SIZE" -gt 72 ]; then
++    echo "警告: 字体大小 $FONT_SIZE 无效，使用默认值 $DEFAULT_FONT_SIZE"
++    FONT_SIZE="$DEFAULT_FONT_SIZE"
+fi
++
++if ! [[ "$SPLIT_PAGES" =~ ^[0-9]+$ ]] || [ "$SPLIT_PAGES" -lt 0 ]; then
++    echo "警告: 分割页数 $SPLIT_PAGES 无效，使用默认值 $DEFAULT_SPLIT_PAGES"
++    SPLIT_PAGES="$DEFAULT_SPLIT_PAGES"
+fi
++
++# 验证标题增量有效性
++if ! [[ "$TITLE_INCREMENT" =~ ^[0-9]+$ ]] || [ "$TITLE_INCREMENT" -lt 0 ] || [ "$TITLE_INCREMENT" -gt 12 ]; then
++    echo "警告: 标题增量 $TITLE_INCREMENT 无效，使用默认值 $DEFAULT_TITLE_INCREMENT"
++    TITLE_INCREMENT="$DEFAULT_TITLE_INCREMENT"
+fi
++
++# 设置工作目录
++WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
++SCRIPT_DIR="$(dirname "$0")"
++
++echo "=============================================="
++echo "PDF到DOCX转换"
++echo "配置参数:"
++echo "  - 字体大小: ${FONT_SIZE}pt"
++echo "  - 分割页数: ${SPLIT_PAGES} (0=不分割)"
++echo "  - 字体名称: ${FONT_NAME}"
++echo "  - 标题增量: ${TITLE_INCREMENT}pt"
++echo "=============================================="
++
++# 参数：PDF文件路径和输出目录
++PDF_FILE="$1"
++OUTPUT_DIR="${2:-${WORKSPACE}/output}"
++
++# 检查输入参数
++if [ -z "$PDF_FILE" ]; then
++    echo "错误: 请提供PDF文件路径"
++    echo "用法: $0 <PDF文件路径> [输出目录]"
++    exit 1
+fi
++
++# 检查PDF文件是否存在
++if [ ! -f "$PDF_FILE" ]; then
++    echo "错误: PDF文件 '$PDF_FILE' 不存在"
++    exit 1
+fi
++
++# 检查文件扩展名
++FILE_EXTENSION="${PDF_FILE##*.}"
++if [ "$FILE_EXTENSION" != "pdf" ] && [ "$FILE_EXTENSION" != "PDF" ]; then
++    echo "警告: 输入文件可能不是有效的PDF文件"
+fi
++
++# 创建输出目录
++mkdir -p "${OUTPUT_DIR}"
++
++# 获取文件名（不含扩展名）
++BASE_NAME="$(basename "$PDF_FILE" .pdf)"
++BASE_NAME="$(basename "$BASE_NAME" .PDF)"
++
++# 设置输出文件路径
++DOCX_OUTPUT="${OUTPUT_DIR}/${BASE_NAME}.docx"
++
++# 创建临时工作目录
++TEMP_DIR="${WORKSPACE}/temp"
++JOB_ID=$(date +%s%N | md5sum | cut -c1-8 2>/dev/null || echo "temp")
++WORK_DIR="${TEMP_DIR}/${JOB_ID}"
+mkdir -p "${WORK_DIR}"
++
++# 安装依赖库
++echo "安装必要的Python库..."
+python3 -m pip install pdfplumber python-docx --quiet
++
++# 创建Python脚本来处理PDF到DOCX的转换
++cat > "${WORK_DIR}/convert_pdf_to_docx.py" << 'EOF'
++#!/usr/bin/env python3
++"""
++PDF到DOCX转换脚本 - 增强版
++"""
++
++import os
++import sys
++import pdfplumber
++from docx import Document
++from docx.shared import Pt, Inches
++from docx.enum.text import WD_ALIGN_PARAGRAPH
++
++# 获取参数
++pdf_path = sys.argv[1]
++docx_output = sys.argv[2]
++font_size = int(sys.argv[3])
++font_name = sys.argv[4]
++title_increment = int(sys.argv[5])
++
++# 计算不同级别的标题字体大小
++heading1_size = Pt(font_size + title_increment)
++heading2_size = Pt(font_size + int(title_increment * 0.7))
++heading3_size = Pt(font_size + int(title_increment * 0.4))
++
++def is_heading(line):
++    """检测一行文本是否可能是标题"""
++    line = line.strip()
++    if len(line) <= 100:  # 标题通常较短
++        # 检查是否全大写或首字母大写
++        if line.isupper() or (line and line[0].isupper() and any(c.isupper() for c in line[1:])):
++            return True
++        # 检查是否以数字、点或其他常见标题标记开头
++        if line.startswith(('1.', '2.', '3.', '一、', '二、', '三、', '#', '##', '###')):
++            return True
++    return False
++
++def convert_pdf_to_docx(pdf_path, docx_output):
++    """将PDF文件转换为DOCX文件"""
++    
++    print(f"开始转换: {pdf_path} -> {docx_output}")
++    
++    # 创建新的Word文档
++    doc = Document()
++    
++    # 设置页面边距
++    sections = doc.sections
++    for section in sections:
++        section.top_margin = Inches(1.0)
++        section.bottom_margin = Inches(1.0)
++        section.left_margin = Inches(1.25)
++        section.right_margin = Inches(1.25)
++    
++    # 打开PDF文件
++    try:
++        with pdfplumber.open(pdf_path) as pdf:
++            total_pages = len(pdf.pages)
++            print(f"PDF总页数: {total_pages}")
++            
++            # 遍历每一页
++            for page_num, page in enumerate(pdf.pages, 1):
++                print(f"处理第 {page_num}/{total_pages} 页...")
++                
++                # 提取文本
++                text = page.extract_text()
++                
++                if text:
++                    # 添加页码
++                    page_header = doc.add_paragraph()
++                    page_header.add_run(f"第 {page_num} 页")
++                    page_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
++                    
++                    # 设置页眉字体
++                    for run in page_header.runs:
++                        run.font.name = font_name
++                        run.font.size = Pt(font_size - 2)
++                    
++                    # 按行分割文本并添加到文档
++                    lines = text.split('\n')
++                    for line in lines:
++                        if line.strip():
++                            paragraph = doc.add_paragraph(line.strip())
++                            
++                            # 根据内容特征判断是否为标题并设置相应样式
++                            if is_heading(line.strip()):
++                                # 可能是标题，使用稍大的字体并加粗
++                                for run in paragraph.runs:
++                                    run.font.name = font_name
++                                    run.font.size = heading2_size
++                                    run.font.bold = True
++                            else:
++                                # 普通文本
++                                for run in paragraph.runs:
++                                    run.font.name = font_name
++                                    run.font.size = Pt(font_size)
++                
++                # 在页面之间添加分页符（除了最后一页）
++                if page_num < total_pages:
++                    doc.add_page_break()
+        
+        # 保存DOCX文件
+        doc.save(docx_output)
+        print(f"DOCX文件已保存: {docx_output}")
+        return True, total_pages
+        
+    except Exception as e:
+        print(f"转换过程出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, 0
++
++if __name__ == "__main__":
++    success, pages = convert_pdf_to_docx(pdf_path, docx_output)
++    sys.exit(0 if success else 1)
+EOF
+
+# 运行转换脚本
+echo "开始转换PDF到DOCX..."
+python3 "${WORK_DIR}/convert_pdf_to_docx.py" "$PDF_FILE" "$DOCX_OUTPUT" "$FONT_SIZE" "$FONT_NAME" "$TITLE_INCREMENT"
+
+# 检查转换结果
+if [ $? -ne 0 ] || [ ! -f "$DOCX_OUTPUT" ]; then
+    echo "错误: PDF到DOCX转换失败"
+    # 清理临时目录
+    rm -rf "${WORK_DIR}"
+    exit 1
+fi
+
+# 检查文件大小
+FILE_SIZE=$(ls -l "$DOCX_OUTPUT" 2>/dev/null | awk '{print $5}' || echo "0")
+if [ "$FILE_SIZE" -lt 100 ]; then
+    echo "警告: 生成的DOCX文件可能为空或损坏"
+fi
+
+# 如果需要分割文件
+if [ "$SPLIT_PAGES" -gt 0 ]; then
+    echo "准备分割DOCX文件..."
+    "${SCRIPT_DIR}/split-docx.sh" "$DOCX_OUTPUT" "$OUTPUT_DIR" "$SPLIT_PAGES"
+    
+    if [ $? -eq 0 ]; then
+        echo "DOCX文件分割成功"
+        # 如果设置了删除原始文件，则删除
+        if [ "$DELETE_ORIGINAL" = "true" ]; then
+            rm -f "$DOCX_OUTPUT"
+            echo "已删除原始DOCX文件"
+        fi
+    else
+        echo "警告: DOCX文件分割失败，但转换已成功"
+    fi
+fi
+
+# 清理临时目录
+if [ -d "${WORK_DIR}" ]; then
+    rm -rf "${WORK_DIR}"
+fi
+
+echo "=============================================="
+echo "PDF到DOCX转换完成!"
+echo "输出文件: $DOCX_OUTPUT"
+echo "=============================================="
+
+exit 0
+--- /dev/null
++++ b/PDF2DOCX/split-docx.sh
+@@ -0,0 +1,233 @@
++#!/bin/bash
++
++# 配置参数
++DEFAULT_SPLIT_SIZE=100      # 默认分割大小（估算的页数）
++DEFAULT_PARAGRAPHS_PER_PAGE=30  # 每页估算段落数
++DEFAULT_DELETE_ORIGINAL=false  # 默认是否删除原始文件
++DEFAULT_RETAIN_FORMATTING=true  # 默认是否保留格式
++DEFAULT_PRESERVE_SECTIONS=true  # 默认是否保留节结构
++
++# 检查输入参数
++if [ $# -lt 2 ]; then
++    echo "用法: $0 <输入DOCX文件> <输出目录> [分割大小]"
+    exit 1
+fi
++
++INPUT_FILE="$1"
++OUTPUT_DIR="$2"
++SPLIT_SIZE="${3:-${SPLIT_PAGES:-$DEFAULT_SPLIT_SIZE}}"
++
++# 从环境变量读取高级配置
++PARAGRAPHS_PER_PAGE="${PARAGRAPHS_PER_PAGE:-$DEFAULT_PARAGRAPHS_PER_PAGE}"
++DELETE_ORIGINAL="${DELETE_ORIGINAL:-$DEFAULT_DELETE_ORIGINAL}"
++RETAIN_FORMATTING="${RETAIN_FORMATTING:-$DEFAULT_RETAIN_FORMATTING}"
++PRESERVE_SECTIONS="${PRESERVE_SECTIONS:-$DEFAULT_PRESERVE_SECTIONS}"
++
++# 检查输入文件是否存在
++if [ ! -f "$INPUT_FILE" ]; then
++    echo "错误: 输入文件 '$INPUT_FILE' 不存在"
++    exit 1
+fi
++
++# 检查文件扩展名
++FILE_EXTENSION="${INPUT_FILE##*.}"
++if [ "$FILE_EXTENSION" != "docx" ] && [ "$FILE_EXTENSION" != "DOCX" ]; then
++    echo "警告: 输入文件可能不是有效的DOCX文件"
+fi
++
++# 创建输出目录
++mkdir -p "$OUTPUT_DIR"
+if [ $? -ne 0 ]; then
+    echo "错误: 无法创建输出目录 '$OUTPUT_DIR'"
+    exit 1
+fi
++
++# 验证分割大小参数
++if ! [[ "$SPLIT_SIZE" =~ ^[0-9]+$ ]] || [ "$SPLIT_SIZE" -lt 1 ]; then
+    echo "警告: 无效的分割大小 '$SPLIT_SIZE'，使用默认值 '$DEFAULT_SPLIT_SIZE'"
+    SPLIT_SIZE="$DEFAULT_SPLIT_SIZE"
+fi
++
++# 设置工作目录
++WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
++TEMP_DIR="${TEMP_DIR:-"${WORKSPACE}/temp"}"
++JOB_ID=$(date +%s%N | md5sum | cut -c1-8 2>/dev/null || echo "temp")
++WORK_DIR="${TEMP_DIR}/${JOB_ID}"
++
++# 创建临时工作目录
++mkdir -p "${WORK_DIR}"
++
++# 输出信息
++echo "=============================================="
+echo "DOCX文件分割工具 - 增强版"
+echo "输入文件: $INPUT_FILE"
+echo "输出目录: $OUTPUT_DIR"
+echo "分割大小: $SPLIT_SIZE 页"
+echo "高级配置:"
+echo "  - 每页段落估算: $PARAGRAPHS_PER_PAGE"
+echo "  - 保留格式: $RETAIN_FORMATTING"
+echo "  - 保留节结构: $PRESERVE_SECTIONS"
+echo "  - 删除原始文件: $DELETE_ORIGINAL"
+echo "=============================================="
++
++# 安装依赖库（如果需要）
+echo "检查依赖..."
+python3 -c "import docx" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "正在安装python-docx库..."
+    python3 -m pip install python-docx --quiet
+fi
++
++# 使用Python进行文件分割
++cat > "${WORK_DIR}/split_docx.py" << 'EOF'
++#!/usr/bin/env python3
++"""
++DOCX文件分割脚本 - 增强版
++"""
++
++import os
++import sys
++import traceback
++from docx import Document
++
++# 获取输入参数
++input_file = sys.argv[1]
++output_dir = sys.argv[2]
++split_size = int(sys.argv[3])
++paragraphs_per_page = int(sys.argv[4])
++retain_formatting = sys.argv[5].lower() == 'true'
++preserve_sections = sys.argv[6].lower() == 'true'
++
++def copy_document_structure(source_doc, target_doc):
++    """复制文档结构，包括样式、节等"""
++    # 复制样式
++    for style in source_doc.styles:
++        try:
++            # 检查样式是否已存在
++            if style.name not in target_doc.styles:
++                try:
++                    new_style = target_doc.styles.add_style(style.name, style.type)
++                    # 复制字体设置
++                    if hasattr(style.font, 'name') and style.font.name:
++                        new_style.font.name = style.font.name
++                    if hasattr(style.font, 'size') and style.font.size:
++                        new_style.font.size = style.font.size
++                    if hasattr(style.font, 'bold'):
++                        new_style.font.bold = style.font.bold
++                    if hasattr(style.font, 'italic'):
++                        new_style.font.italic = style.font.italic
++                    if hasattr(style.font, 'underline'):
++                        new_style.font.underline = style.font.underline
++                except Exception:
++                    # 某些样式可能无法复制，忽略错误
++                    pass
++        except Exception:
++            # 忽略样式复制错误
++            pass
++    
++    # 复制页面设置
++    if preserve_sections and hasattr(source_doc, 'sections'):
++        source_section = source_doc.sections[0]
++        target_section = target_doc.sections[0]
++        
++        try:
++            target_section.top_margin = source_section.top_margin
++            target_section.bottom_margin = source_section.bottom_margin
++            target_section.left_margin = source_section.left_margin
++            target_section.right_margin = source_section.right_margin
++        except Exception:
++            # 忽略页面设置复制错误
++            pass
++
++def copy_paragraph_format(source_para, target_para, retain_format):
++    """复制段落格式"""
++    if not retain_format:
++        return
++        
++    try:
++        # 复制段落对齐方式
++        if hasattr(source_para, 'alignment'):
++            target_para.alignment = source_para.alignment
++            
++        # 复制段落间距
++        if hasattr(source_para.paragraph_format, 'space_before') and source_para.paragraph_format.space_before:
++            target_para.paragraph_format.space_before = source_para.paragraph_format.space_before
++        if hasattr(source_para.paragraph_format, 'space_after') and source_para.paragraph_format.space_after:
++            target_para.paragraph_format.space_after = source_para.paragraph_format.space_after
++            
++        # 复制缩进
++        if hasattr(source_para.paragraph_format, 'left_indent') and source_para.paragraph_format.left_indent:
++            target_para.paragraph_format.left_indent = source_para.paragraph_format.left_indent
++    except Exception:
++        # 忽略段落格式复制错误
++        pass
++
++def copy_run_format(source_run, target_run, retain_format):
++    """复制文本运行格式"""
++    if not retain_format:
++        return
++        
++    try:
++        # 复制基本格式
++        target_run.bold = source_run.bold
++        target_run.italic = source_run.italic
++        target_run.underline = source_run.underline
++        
++        # 复制字体设置
++        if hasattr(source_run.font, 'name') and source_run.font.name:
++            target_run.font.name = source_run.font.name
++        if hasattr(source_run.font, 'size') and source_run.font.size:
++            target_run.font.size = source_run.font.size
++        if hasattr(source_run.font, 'color') and source_run.font.color and hasattr(source_run.font.color, 'rgb') and source_run.font.color.rgb:
++            target_run.font.color.rgb = source_run.font.color.rgb
++    except Exception:
++        # 忽略格式复制错误
++        pass
++
++def get_approximate_page_count(docx_path):
++    """估算DOCX文件的页数"""
++    try:
++        doc = Document(docx_path)
++        total_paragraphs = len(doc.paragraphs)
++        # 使用段落数估算页数
++        approx_pages = max(1, (total_paragraphs + paragraphs_per_page - 1) // paragraphs_per_page)
++        return approx_pages
++    except Exception as e:
++        print(f"警告: 估算页数时出错: {e}")
++        return 1
++
++def main():
++    print(f'开始分割文档: {input_file}')
++
++    # 打开原始文档
++    try:
++        doc = Document(input_file)
++        
++        # 计算文档中的段落总数
++        total_paragraphs = len(doc.paragraphs)
++        print(f'文档包含 {total_paragraphs} 个段落')
++        
++        # 估算总页数
++        estimated_pages = get_approximate_page_count(input_file)
++        print(f'估算总页数: {estimated_pages} 页')
++        
++        # 根据分割大小计算每个分割文件的段落数
++        paragraphs_per_split = split_size * paragraphs_per_page
++        
++        # 计算需要分割的文件数量
++        num_splits = (total_paragraphs + paragraphs_per_split - 1) // paragraphs_per_split
++        print(f'将分割为 {num_splits} 个文件')
++        
++        # 获取基本文件名
++        base_name = os.path.splitext(os.path.basename(input_file))[0]
++        
++        # 创建分割文件
++        for i in range(num_splits):
++            print(f'创建分割文件 {i+1}/{num_splits}...')
++            
++            # 计算当前分割文件的段落范围
++            start_idx = i * paragraphs_per_split
++            end_idx = min((i + 1) * paragraphs_per_split, total_paragraphs)
++            
++            # 创建新文档
++            new_doc = Document()
++            
++            # 复制文档结构
++            copy_document_structure(doc, new_doc)
++            
++            # 复制段落到新文档
++            for j in range(start_idx, end_idx):
++                paragraph = doc.paragraphs[j]
++                
++                # 添加标题说明当前分割范围
++                if j == start_idx and i > 0:
++                    title_para = new_doc.add_paragraph()
++                    title_run = title_para.add_run(f'=== 文档分割部分 {i+1}/{num_splits} (段落 {start_idx+1}-{end_idx}) ===')
++                    title_run.bold = True
++                    title_para.alignment = 1  # 居中对齐
++                
++                new_para = new_doc.add_paragraph()
++                
++                # 复制段落文本和格式
++                for run in paragraph.runs:
++                    new_run = new_para.add_run(run.text)
++                    # 复制格式
++                    copy_run_format(run, new_run, retain_formatting)
++                
++                # 复制段落格式
++                copy_paragraph_format(paragraph, new_para, retain_formatting)
++            
++            # 保存分割文件
++            output_file = os.path.join(output_dir, f'{base_name}_part{i+1}.docx')
++            new_doc.save(output_file)
++            print(f'已保存: {output_file}')
++        
++        print(f'DOCX文件分割完成，共 {num_splits} 个文件')
++        return 0
++    except Exception as e:
++        print(f'错误: 分割文档时出错: {e}')
++        traceback.print_exc()
++        return 1
++
++if __name__ == '__main__':
++    sys.exit(main())
++EOF
++
++# 运行Python脚本
+echo "开始分割DOCX..."
+python3 "${WORK_DIR}/split_docx.py" "$INPUT_FILE" "$OUTPUT_DIR" "$SPLIT_SIZE" "$PARAGRAPHS_PER_PAGE" "$RETAIN_FORMATTING" "$PRESERVE_SECTIONS"
++
++# 检查执行结果
++EXIT_CODE=$?
++if [ $EXIT_CODE -eq 0 ]; then
+    echo "分割操作成功完成"
+    # 删除原始文件（如果需要）
+    if [ "$DELETE_ORIGINAL" = "true" ]; then
+        echo "删除原始文件: $INPUT_FILE"
+        rm -f "$INPUT_FILE"
+    fi
+else
+    echo "分割操作失败，退出码: $EXIT_CODE"
+fi
++
++# 清理临时目录
++if [ -d "${WORK_DIR}" ]; then
+    rm -rf "${WORK_DIR}"
+fi
++
++echo "DOCX分割处理完成!"
+exit $EXIT_CODE
+--- /dev/null
++++ b/PDF2DOCX/enhance-font-size.patch
+@@ -0,0 +1,125 @@
++--- a/PDF2DOCX/pdf-convert.sh
+++++ b/PDF2DOCX/pdf-convert.sh
++@@ -29,6 +29,13 @@ DEFAULT_FONT_SIZE=12
++ DEFAULT_SPLIT_PAGES=10
++ 
++ # 从环境变量读取或使用默认值
+++# 字体名称设置
+++DEFAULT_FONT_NAME="Arial"
+++FONT_NAME="${FONT_NAME:-$DEFAULT_FONT_NAME}"
+++
+++# 标题字体大小增量设置
+++DEFAULT_TITLE_INCREMENT=6
+++TITLE_INCREMENT="${TITLE_INCREMENT:-$DEFAULT_TITLE_INCREMENT}"
++ FONT_SIZE="${FONT_SIZE:-$DEFAULT_FONT_SIZE}"
++ SPLIT_PAGES="${SPLIT_PAGES:-$DEFAULT_SPLIT_PAGES}"
++ 
++@@ -42,6 +49,16 @@ if ! [[ "$SPLIT_PAGES" =~ ^[0-9]+$ ]] || [ "$SPLIT_PAGES" -lt 0 ]; then
++     SPLIT_PAGES="$DEFAULT_SPLIT_PAGES"
++ fi
++ 
+++# 验证标题增量有效性
+++if ! [[ "$TITLE_INCREMENT" =~ ^[0-9]+$ ]] || [ "$TITLE_INCREMENT" -lt 0 ] || [ "$TITLE_INCREMENT" -gt 12 ]; then
+++    echo "警告: 标题增量 $TITLE_INCREMENT 无效，使用默认值 $DEFAULT_TITLE_INCREMENT"
+++    TITLE_INCREMENT="$DEFAULT_TITLE_INCREMENT"
+++fi
+++
+++# 验证字体名称有效性
+++if [ -z "$FONT_NAME" ]; then
+++    FONT_NAME="$DEFAULT_FONT_NAME"
+++fi
++ echo "=============================================="
++ echo "PDF转DOCX转换"
++ echo "配置参数:"
++@@ -49,6 +66,8 @@ echo "配置参数:"
++ echo "  - 字体大小: ${FONT_SIZE}pt"
++ echo "  - 分割页数: ${SPLIT_PAGES} (0=不分割)"
++ echo "=============================================="
+++echo "字体增强配置:"
+++echo "  - 字体名称: ${FONT_NAME}"
+++echo "  - 标题字体增量: ${TITLE_INCREMENT}pt"
++
++ # 参数：PDF文件路径
++ PDF_FILE="$1"
